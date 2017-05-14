@@ -1,6 +1,6 @@
 import React from 'react';
 import KanbanBoard from './KanbanBoard';
-import render from 'react-dom';
+import { render } from 'react-dom';
  
 let cardsList = [
 {

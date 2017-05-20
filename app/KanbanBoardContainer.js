@@ -41,6 +41,15 @@ class KanbanBoardContainer extends Component {
 		return this.maxTaskId(cardId) + 1;
 	}
 
+	revertStateIfNeeded(fn){
+		const state = this.state;
+		return fn()
+		.catch(e => {
+			console.error(`Server error ${e.message}`);
+			this.setState(state);
+		})
+	}
+
 	addTask(cardId, taskName){
 		const cardIndex = this.getCardIndex(cardId);
 		const taskId = this.nextTaskId(cardId);
@@ -51,9 +60,16 @@ class KanbanBoardContainer extends Component {
 					$push: [newTask]
 				}
 			}
-		})
-		this.setState({ cards: newState });
-		this.addTaskInServer(cardId, newTask);
+		});
+		return this.revertStateIfNeeded(() => {
+			this.setState({ cards: newState });
+			return this.addTaskInServer(cardId, newTask)
+			.then(r => r.json())
+			.then(body => {
+				newTask.id = body.id;
+				this.setState({ cards: newState });
+			});
+		});
 	}
 
 	addTaskInServer(cardId, newTask){
@@ -69,8 +85,10 @@ class KanbanBoardContainer extends Component {
 				}
 			}
 		});
-		this.setState({ cards: newState });
-		this.deleteTaskInServer(cardId, taskId);
+		return this.revertStateIfNeeded(() => {
+			this.setState({ cards: newState });
+			return this.deleteTaskInServer(cardId, taskId);
+		});
 	}
 
 	deleteTaskInServer(cardId, taskId){
@@ -79,8 +97,20 @@ class KanbanBoardContainer extends Component {
 	}
 
 	toggleTask(cardId, taskId, taskIndex){
+		const cardIndex = this.getCardIndex(cardId);
+		const newDone = !this.state.cards[cardIndex].tasks[taskIndex].done;
+		const newState = update(this.state.cards, { [cardIndex]: { tasks: {[taskIndex]: { done: { $set: newDone } } } }});
 
+		return this.revertStateIfNeeded(() => {
+			this.setState({ cards: newState });
+			return this.toggleTaskInServer(cardId, taskId, { done: newDone });
+		});
 	}
+
+	toggleTaskInServer(cardId, taskId, body){
+		const path = `cards/${cardId}/tasks/${taskId}`;
+		return this.apiCallPut(path, body);
+	};
 
 	apiCall(path, method, body){
 		const URL = `${API_URL}/${path}`;
@@ -88,7 +118,10 @@ class KanbanBoardContainer extends Component {
 		const data = { headers };
 		data.method = method || 'get';
 		if (body) data.body = JSON.stringify(body);
-		return fetch(URL, data);
+		return fetch(URL, data)
+		.then(r => {
+			return r.ok ? r : Promise.reject(new Error('Server sync failed'));
+		});
 	}
 
 	apiCallGet(path){
@@ -102,6 +135,10 @@ class KanbanBoardContainer extends Component {
 
 	apiCallPost(path, body){
 		return this.apiCall(path, 'post', body);
+	}
+
+	apiCallPut(path, body){
+		return this.apiCall(path, 'put', body);
 	}
 
 	componentDidMount(){
